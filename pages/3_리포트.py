@@ -7,6 +7,7 @@
 import streamlit as st
 
 from core import config as C, gates, load, metrics as M
+from core.todo import NotYet
 from report import sections as S, to_pdf
 from viz import pdf_charts, ui
 
@@ -79,12 +80,14 @@ with body:
         if "device" in sec.get("charts", []):
             f = M.funnel(t[C.FUNNEL_TABLE])
             bi = max(int(f.index[f.is_bottleneck][0]), 1)
-            g = M.funnel_by(t[C.FUNNEL_TABLE], t.get("sessions"), DIM,
-                            f.step.iloc[bi - 1], f.step.iloc[bi])
-            st.image(pdf_charts.device_png(g), width="stretch")
+            g = ui.guard(M.funnel_by, t[C.FUNNEL_TABLE], t.get("sessions"), DIM,
+                         f.step.iloc[bi - 1], f.step.iloc[bi])
+            if g is not None:
+                st.image(pdf_charts.device_png(g), width="stretch")
         if "experiments" in sec.get("charts", []):
-            st.image(pdf_charts.experiments_png(M.experiment_results(t)),
-                     width="stretch")
+            res = ui.guard(M.experiment_results, t)
+            if res is not None:
+                st.image(pdf_charts.experiments_png(res), width="stretch")
     else:
         st.caption(sec["placeholder"])
         if sec.get("hint"):
@@ -104,18 +107,28 @@ with c1:
     st.markdown("**PDF** — 표지 · 목차 · 차트 포함")
     if st.button("PDF 만들기", type="primary"):
         with st.spinner("차트를 그리고 PDF를 조립하는 중..."):
+            # 아직 안 채운 계산은 그 차트만 빼고 조립한다.
+            # build_pdf 가 charts.get() 으로 읽으므로 없는 키는 건너뛴다.
             f = M.funnel(t[C.FUNNEL_TABLE])
             bi = max(int(f.index[f.is_bottleneck][0]), 1)
-            g = M.funnel_by(t[C.FUNNEL_TABLE], t.get("sessions"), DIM,
-                            f.step.iloc[bi - 1], f.step.iloc[bi])
-            charts = {
-                "funnel": pdf_charts.funnel_png(f),
-                "device": pdf_charts.device_png(g),
-                "experiments": pdf_charts.experiments_png(M.experiment_results(t)),
-            }
+            charts = {"funnel": pdf_charts.funnel_png(f)}
+            빠짐 = []
+            try:
+                g = M.funnel_by(t[C.FUNNEL_TABLE], t.get("sessions"), DIM,
+                                f.step.iloc[bi - 1], f.step.iloc[bi])
+                charts["device"] = pdf_charts.device_png(g)
+            except NotYet as e:
+                빠짐.append(f"분해 축 차트 ({e.day})")
+            try:
+                charts["experiments"] = pdf_charts.experiments_png(
+                    M.experiment_results(t))
+            except NotYet as e:
+                빠짐.append(f"실험 차트 ({e.day})")
             pdf = to_pdf.build_pdf(secs, charts)
         st.session_state.pdf = pdf
         st.success(f"생성 완료 · {len(pdf)/1024:.0f}KB")
+        if 빠짐:
+            st.caption("아직 안 채운 자리는 빼고 만들었습니다 — " + " · ".join(빠짐))
     if st.session_state.get("pdf"):
         st.download_button("PDF 내려받기", st.session_state.pdf,
                            file_name=f"성장리포트_{C.PERIOD[0][:7]}.pdf",
