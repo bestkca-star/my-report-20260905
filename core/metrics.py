@@ -105,6 +105,44 @@ def funnel_by(fe: pd.DataFrame, se: pd.DataFrame, dim: str,
 
 
 # ── 유지 퍼널 ─────────────────────────────────────────────────────
+# ── 유지 퍼널 ─────────────────────────────────────────────────────
+# 유지 단계의 **조건**. config.RETENTION_STEPS 에 적은 이름이 이 표의 키다.
+# 각 조건은 검진건 한 행이 그 단계에 해당하는지를 True/False 로 돌려준다.
+# 그레인은 획득 퍼널과 같은 **검진 건 1회**다.
+def _t(s):
+    """True/False/NULL 이 섞인 컬럼에서 True 만 고른다 (category dtype 안전)."""
+    return s.astype("object") == True      # noqa: E712
+
+
+RETENTION_CONDITIONS = {
+    "결과수신":       lambda c: c["_수신"],
+    "관측창닫힘":     lambda c: c["_수신"] & c["재검_90일내"].notna(),
+    "재검없음":       lambda c: c["재검_90일내"].astype("object") == False,  # noqa: E712
+    "재검발생":       lambda c: _t(c["재검_90일내"]),
+    "심사유의없음":   lambda c: c["_수신"] & (c["심사유의여부"].astype("object") == False),  # noqa: E712
+    "심사유의":       lambda c: _t(c["심사유의여부"]),
+    "경계선":         lambda c: _t(c["경계선여부"]),
+    "유의항목2개이상": lambda c: c["유의항목수"].fillna(0) >= 2,
+}
+
+
+def _cond(name):
+    if name not in RETENTION_CONDITIONS:
+        raise KeyError(
+            f"유지 단계 '{name}' 의 조건이 없습니다. "
+            f"쓸 수 있는 이름: {', '.join(RETENTION_CONDITIONS)}")
+    return RETENTION_CONDITIONS[name]
+
+
+def _retention_base(t: dict) -> pd.DataFrame:
+    """검진건 표에 '결과를 수신했는가'를 붙인다. 조건들이 이걸 쓴다."""
+    c = t["검진건"].copy()
+    e = t[C.FUNNEL_TABLE]
+    수신 = set(e.loc[e[C.EVENT_STEP_COL] == C.FUNNEL_STEPS[-1], C.EVENT_ID_COL])
+    c["_수신"] = c[C.EVENT_ID_COL].isin(수신)
+    return c
+
+
 @st.cache_data(show_spinner=False)
 def retention_funnel(t: dict) -> pd.DataFrame:
     """유지 퍼널. config.RETENTION_STEPS 의 단계대로 센다.
@@ -132,14 +170,87 @@ def retention_funnel(t: dict) -> pd.DataFrame:
 
     반환: DataFrame[step, label, n, step_rate, cum_rate]
     """
-    todo("Day2 실습 D", "유지 퍼널",
-         "7주차에 정한 유지·이탈의 정의를 config.RETENTION_STEPS 에 옮기고 "
-         "그레인을 다시 확인하십시오.",
-         "core/metrics.py  retention_funnel()")
+    steps = C.RETENTION_STEPS
+    if not steps:
+        todo("Day2 실습 D", "유지 퍼널",
+             "config.RETENTION_STEPS 가 비어 있습니다. 단계 이름과 설명을 "
+             "순서대로 넣으십시오. 쓸 수 있는 이름은 RETENTION_CONDITIONS 에 있습니다.",
+             "core/config.py  RETENTION_STEPS")
+
+    c = _retention_base(t)
+    n = [int(_cond(name)(c).sum()) for name, _ in steps]
+
+    rows, first = [], n[0]
+    for i, (name, desc) in enumerate(steps):
+        rows.append({
+            "step": name,
+            "label": desc or name,
+            "n": n[i],
+            "step_rate": np.nan if i == 0 else (n[i] / n[i-1] if n[i-1] else np.nan),
+            "cum_rate": n[i] / first if first else np.nan,
+        })
+    return pd.DataFrame(rows)
+
+
+def retention_order_check(t: dict, steps=None) -> pd.DataFrame:
+    """**퍼널인지 아닌지를 가른다.**
+
+    앞 단계를 거치지 않고 다음 단계에 나타난 대상이 몇 건인가를 센다.
+    많으면 그것은 퍼널이 아니라 그냥 분류다 — 그때는 단계로 쌓지 말고
+    분해 축으로 쓴다.
+
+    반환: DataFrame[앞, 뒤, 뒤 건수, 위반, 위반 비율]
+    """
+    steps = steps if steps is not None else C.RETENTION_STEPS
+    c = _retention_base(t)
+    ID = C.EVENT_ID_COL
+    S = {name: set(c.loc[_cond(name)(c), ID]) for name, _ in steps}
+
+    rows = []
+    for (a, _), (b, _) in zip(steps, steps[1:]):
+        위반 = S[b] - S[a]
+        rows.append({"앞": a, "뒤": b, "뒤 건수": len(S[b]),
+                     "위반": len(위반),
+                     "위반 비율": len(위반) / len(S[b]) if S[b] else np.nan})
+    return pd.DataFrame(rows)
 
 
 # ── KPI ───────────────────────────────────────────────────────────
 @st.cache_data(show_spinner=False)
+def _kpi_base(t: dict) -> pd.DataFrame:
+    """검진건 표에 '수신했는가'와 '언제 수신했는가'를 붙인다."""
+    c = _retention_base(t)
+    e = t[C.FUNNEL_TABLE].drop_duplicates()
+    last = C.FUNNEL_STEPS[-1]
+    col = C.DATE_COLS[C.FUNNEL_TABLE]
+    수신일 = (e[e[C.EVENT_STEP_COL] == last]
+              .groupby(C.EVENT_ID_COL, observed=True)[col].min())
+    c["_수신일"] = to_dt(c[C.EVENT_ID_COL].map(수신일))
+    return c
+
+
+def _rates(c: pd.DataFrame) -> dict:
+    """지표 셋의 계산식. kpis() 와 monthly() 가 같은 식을 쓴다.
+
+    같은 식을 두 곳에 적으면 반드시 어긋나므로 여기 한 번만 적는다.
+    """
+    수신 = int(c["_수신"].sum())
+    유의 = int(_t(c["심사유의여부"]).sum())
+    경계선 = int(_t(c["경계선여부"]).sum())
+    닫힘 = int((c["_수신"] & c["재검_90일내"].notna()).sum())
+    재검 = int(_t(c["재검_90일내"]).sum())
+    return {
+        # 주지표 (명세 3행) — 분모는 결과 수신 건. 분자는 검진 측 판정이다.
+        "심사유의율": 유의 / 수신 * 100 if 수신 else np.nan,
+        # 가드레일 ① — 분모는 수신 건이 아니라 **심사유의 건**이다.
+        #   경계선여부는 유의 판정이 있어야 존재한다(구조적 결측).
+        "경계선 비율": 경계선 / 유의 * 100 if 유의 else np.nan,
+        # 명세 5행 — 분모는 관측 창 90일이 닫힌 건뿐이다.
+        #   창이 안 닫힌 건을 분모에 넣으면 재작업률이 실제보다 낮게 나온다.
+        "재작업률": 재검 / 닫힘 * 100 if 닫힘 else np.nan,
+    }
+
+
 def kpis(t: dict) -> dict:
     """지표 카드.
 
@@ -165,9 +276,14 @@ def kpis(t: dict) -> dict:
                      "unit": "원", "fmt": "{:,.0f}원"},
         }
     """
-    todo("Day2 실습 E", "지표 카드",
-         "내 데이터에서 금액·이탈에 해당하는 컬럼이 무엇입니까? 없는 지표는 빼십시오.",
-         "core/metrics.py  kpis()")
+    r = _rates(_kpi_base(t))
+    # ⚠ 가드레일 ②③④(건당 유의 항목 수 · 기관별 분산 · 재방문 출장비)는
+    #   계산식이 아직 정해지지 않아 넣지 않았다. -> CLAUDE.md 「아직 안 정한 것」
+    return {
+        "심사유의율":   {"value": r["심사유의율"],   "unit": "%", "fmt": "{:.2f}%"},
+        "경계선 비율": {"value": r["경계선 비율"], "unit": "%", "fmt": "{:.2f}%"},
+        "재작업률":     {"value": r["재작업률"],     "unit": "%", "fmt": "{:.2f}%"},
+    }
 
 
 @st.cache_data(show_spinner=False)
@@ -181,9 +297,16 @@ def monthly(t: dict) -> pd.DataFrame:
 
     반환: 인덱스가 기간(예 "2025-01"), 열이 지표인 DataFrame
     """
-    todo("Day2 실습 E", "기간별 추이",
-         "기간을 무엇으로 자릅니까? 월이 너무 길면 주로 자르십시오.",
-         "core/metrics.py  monthly()")
+    c = _kpi_base(t)
+    c = c[c["_수신일"].notna()]
+    # **분기로 자른다.** 월로 자르면 수신이 66~100건뿐이라 변동(26.9~48.1%)이
+    # 전부 표본 노이즈다(동질성 p=0.271). 판정은 분기 단위로 한다는 것이
+    # 이미 정해져 있다. -> CLAUDE.md 「임계값과 근거」
+    key = c["_수신일"].dt.to_period("Q").astype(str)
+    rows = {g: _rates(sub) for g, sub in c.groupby(key, observed=True)}
+    out = pd.DataFrame(rows).T.sort_index()
+    out.index.name = "분기"
+    return out
 
 
 def status_of(name: str, value: float) -> str:
@@ -195,8 +318,16 @@ def status_of(name: str, value: float) -> str:
     th = C.THRESHOLDS.get(name)
     if not th:
         return "ok"
+    # 양방향 지표 — 위쪽 경계도 본다. 상한이 없는 지표는 이 두 줄을 그냥 지나간다.
+    # 이게 없으면 "경고 29 / 위험 25"만 보고 48%도 정상으로 판정한다.
+    if "위험_상한" in th and value > th["위험_상한"]:
+        return "block"
+    if "경고_상한" in th and value > th["경고_상한"]:
+        return "warn"
+
     # ★ 높을수록 나쁜 지표. 내 지표 이름을 넣는다.
-    higher_is_worse = {"이탈률", "이탈율", "해지율", "불량률", "반품률"}
+    higher_is_worse = {"이탈률", "이탈율", "해지율", "불량률", "반품률",
+                       "재작업률", "경계선 비율"}
     if name in higher_is_worse:
         return ("block" if value > th["위험"]
                 else "warn" if value > th["경고"] else "ok")
