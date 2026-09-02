@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+runs/*.json
+.streamlit/secrets.toml
+
+# 가상환경 — requirements.txt 로 재현한다
+.venv/
+
+# 데이터 — 합성이지만 저장소에 넣을지 아직 정하지 않았다.
+# 넣기로 하면 이 두 줄을 지운다. (9주차 Streamlit 배포에는 필요하다)
+data/*.csv
+!data/README.md
