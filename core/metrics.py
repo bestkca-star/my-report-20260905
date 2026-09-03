@@ -337,6 +337,64 @@ def monthly(t: dict) -> pd.DataFrame:
     return out
 
 
+def judge_pairs(t: dict) -> list[dict]:
+    """인접한 두 분기를 짝지어 **전후 비교** 카드를 만든다.
+
+    실험이 없는 도메인이므로 A/B 대신 구간 비교다. 그래서 **인과를 주장할 수 없다** —
+    두 분기는 무작위로 나눈 것이 아니라 시간 순서일 뿐이고, 차이의 원인은
+    이 표만으로 알 수 없다. 그 문장을 카드마다 넣는다(각주로 빼면 아무도 안 읽는다).
+
+    판정 순서는 judge() 와 같다: 못 믿을 조건 -> 주지표 -> 가드레일.
+    """
+    m = monthly(t)
+    c = _kpi_base(t)
+    q = c.loc[c["_수신일"].notna(), "_수신일"].dt.to_period("Q").astype(str)
+    n_by = q.value_counts().to_dict()
+    주 = "심사유의율"
+    카드 = []
+    for 앞, 뒤 in zip(m.index, m.index[1:]):
+        n앞, n뒤 = int(n_by.get(앞, 0)), int(n_by.get(뒤, 0))
+        row = {"앞": 앞, "뒤": 뒤, "모수": (n앞, n뒤),
+               "인과": ("관측 데이터이므로 인과를 주장할 수 없습니다. 두 분기는 무작위로 "
+                        "나눈 것이 아니라 시간 순서일 뿐이며, 차이의 원인은 이 표만으로 "
+                        "알 수 없습니다.")}
+
+        # ① 못 믿을 조건 — 양쪽 분기 모두 표본을 넘어야 비교할 수 있다.
+        사유 = trust_check({}, min(n앞, n뒤))
+        if 사유:
+            모자란 = 앞 if n앞 <= n뒤 else 뒤
+            row.update(판정="무효", 색="block",
+                       사유=f"{모자란}: {사유}",
+                       설명="못 믿을 조건에 걸려 지표를 계산하지 않았습니다.")
+            카드.append(row)
+            continue
+
+        # ② 주지표
+        a, b = m[주].iloc[m.index.get_loc(앞)], m[주].iloc[m.index.get_loc(뒤)]
+        d = b - a
+        row.update(주지표={"이름": 주, "앞": a, "뒤": b, "변화": d, "기준": C.MOVE_MIN})
+
+        # ③ 가드레일 — 주지표가 움직였을 때만 본다.
+        가드 = []
+        for 이름, 한계 in C.GUARDRAILS.items():
+            ga = m[이름].iloc[m.index.get_loc(앞)]
+            gb = m[이름].iloc[m.index.get_loc(뒤)]
+            if pd.isna(ga) or pd.isna(gb):
+                가드.append({"이름": 이름, "확인불가": True}); continue
+            가드.append({"이름": 이름, "앞": ga, "뒤": gb, "변화": gb - ga,
+                         "기준": 한계, "악화": (gb - ga) >= 한계})
+        row["가드레일"] = 가드
+
+        if abs(d) < C.MOVE_MIN:
+            row.update(판정="차이 없음", 색="none")
+        elif any(g.get("악화") for g in 가드):
+            row.update(판정="주의 필요", 색="warn")
+        else:
+            row.update(판정="주목할 만함", 색="ok")
+        카드.append(row)
+    return 카드
+
+
 def judge(t: dict) -> dict:
     """직전 분기 대비 최근 분기 판정. **순서가 곧 설계다.**
 

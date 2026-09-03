@@ -125,28 +125,67 @@ def 감춘이유(칸, 사유, 도달, 비중, dim):
 
 
 # ── 판정 카드 ─────────────────────────────────────────────────────
-ui.section("판정", "가드레일까지 보고 판정한다")
-j = ui.guard(M.judge, t)
-if j:
-    MARK = {"ok": "○", "warn": "▲", "block": "✕", "none": "●"}
-    col = C.COLORS.get(j["색"], "#94a3b8")
-    # 색만으로 전달하지 않는다 — 기호·글자를 같이 쓴다(색맹 고려).
-    st.markdown(
-        f'<div class="card" style="border-left:4px solid {col}">'
-        f'<div style="font-size:12px;color:#64748b">{j["기간"]} · 표본 {j["표본"]:,}건</div>'
-        f'<div style="font-size:20px;font-weight:800;margin-top:2px">'
-        f'{MARK[j["색"]]} {j["판정"]}</div>'
-        + (f'<div style="font-size:12.5px;color:#64748b;margin-top:6px">{j["사유"]}</div>'
-           if j["사유"] else "")
-        + '</div>', unsafe_allow_html=True)
+ui.section("전후 비교", "실험이 없으므로 전후로 대신한다 — 인과는 주장하지 않는다")
+카드들 = ui.guard(M.judge_pairs, t)
+for k in (카드들 or []):
+    col = C.COLORS.get(k["색"], "#94a3b8")
+    h = (f'<div class="card" style="border-left:4px solid {col};margin-bottom:10px">'
+         f'<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+         f'<div><div style="font-size:11px;color:#64748b;letter-spacing:.3px">'
+         f'{k["앞"]} → {k["뒤"]}</div>'
+         f'<div style="font-size:16px;font-weight:800;margin-top:2px">'
+         f'{k["앞"]} 수신분 대비 {k["뒤"]} 수신분</div>'
+         f'<div style="font-size:12px;color:#64748b;margin-top:6px">'
+         f'모수 {k["모수"][0]:,}건 → {k["모수"][1]:,}건</div></div>'
+         f'<div>{ui.badge(k["색"], k["판정"])}</div></div>')
 
-    # 판정 과정 — 어디까지 갔다가 어디서 갈렸는지. 접힌 상태로 시작한다.
+    if "주지표" in k:
+        j = k["주지표"]
+        h += (f'<div style="font-size:30px;font-weight:800;margin-top:10px">'
+              f'{j["변화"]:+.2f}%p</div>'
+              f'<div style="font-size:12px;color:#64748b;margin-top:2px">'
+              f'{j["이름"]} {j["앞"]:.2f}% → {j["뒤"]:.2f}% (움직임 기준 {j["기준"]:.0f}%p)</div>'
+              f'<hr style="border:0;border-top:1px dashed #e2e8f0;margin:12px 0">')
+        for g in k["가드레일"]:
+            if g.get("확인불가"):
+                h += (f'<div style="font-size:12.5px;color:#64748b">가드레일 {g["이름"]} '
+                      f'— 관측 창이 안 닫혀 <b>확인할 수 없음</b></div>')
+            else:
+                c2 = C.COLORS["warn"] if g["악화"] else "#64748b"
+                h += (f'<div style="font-size:12.5px;color:{c2}">가드레일 {g["이름"]} '
+                      f'{g["앞"]:.2f}% → {g["뒤"]:.2f}% ({g["변화"]:+.2f}%p, '
+                      f'악화 기준 {g["기준"]:.0f}%p)</div>')
+    else:
+        # 못 믿을 조건에 걸린 카드 — 사유만. 지표 값은 계산하지 않았으므로 없다.
+        h += (f'<div class="blocked" style="margin-top:10px">'
+              f'<b>{k["사유"]}</b><br>{k["설명"]}</div>')
+
+    # 교안 p14 — 이 문장은 카드 **안**에 넣는다. 각주로 빼면 아무도 안 읽는다.
+    h += (f'<div style="font-size:12px;color:{C.COLORS["block"]};margin-top:10px">'
+          f'{k["인과"]}</div></div>')
+    st.markdown(h, unsafe_allow_html=True)
+
     with st.status("판정 과정", expanded=False) as box:
-        for st_ in j["단계"]:
-            표 = {True: "✓", False: "✕", None: "—"}[st_["통과"]]
-            st.write(f"{표} **{st_['이름']}** — {st_['값']}")
-        box.update(label=f"판정 과정 · {j['판정']}",
-                   state="error" if j["색"] == "block" else "complete")
+        if "주지표" in k:
+            st.write(f"✓ **못 믿을 조건 확인** — 양쪽 분기 모두 표본 "
+                     f"{min(k['모수']):,}건 이상 · 통과")
+            j = k["주지표"]; 움직 = abs(j["변화"]) >= j["기준"]
+            st.write(f"{'✓' if 움직 else '✕'} **주지표 · {j['이름']}** — "
+                     f"{j['앞']:.2f}% → {j['뒤']:.2f}% ({j['변화']:+.2f}%p)")
+            if not 움직:
+                st.write("— **가드레일** — 주지표가 안 움직여 판정에 쓰지 않음")
+            else:
+                for g in k["가드레일"]:
+                    st.write(("— " if g.get("확인불가") else ("✕ " if g["악화"] else "✓ "))
+                             + f"**가드레일 · {g['이름']}** — "
+                             + ("관측 창이 안 닫혀 확인할 수 없음" if g.get("확인불가")
+                                else f"{g['변화']:+.2f}%p"))
+        else:
+            st.write(f"✕ **못 믿을 조건 확인** — {k['사유']}")
+            st.write("— **주지표** — 계산하지 않음")
+            st.write("— **가드레일** — 계산하지 않음")
+        box.update(label=f"판정 과정 · {k['판정']}",
+                   state="error" if k["색"] == "block" else "complete")
 
 # ── 퍼널 (탭) ─────────────────────────────────────────────────────
 def _cohort_events(t, lo, hi):
