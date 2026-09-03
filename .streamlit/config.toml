@@ -7,6 +7,11 @@ textColor = "#0f172a"
 
 [server]
 maxUploadSize = 20
+# core/ 같은 import 모듈이 바뀌어도 다시 읽게 한다.
+# 이게 없으면 config.py 를 고쳐도 서버가 옛 모듈을 그대로 써서
+# "has no attribute" 가 난다 (2026-09-02 · 09-03 두 번 겪었다).
+runOnSave = true
+fileWatcherType = "auto"
 
 [browser]
 gatherUsageStats = false
