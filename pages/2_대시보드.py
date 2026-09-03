@@ -88,6 +88,9 @@ if k:
                 delta_color=DELTA_COLOR.get(name, "normal"),
                 border=True,
             )
+            with st.popover("정의"):
+                st.markdown(f"**{name}**")
+                st.caption(C.METRIC_DEFS.get(name, "정의 미기재"))
             st.caption(_guide(name, lv))
             if span:
                 st.caption(span)
@@ -99,6 +102,27 @@ if k:
                     key=f"sp_{name}")
     st.caption("⚠ 심사유의율의 **위쪽 경고선(43%·47%)은 아직 판정에 반영되지 않습니다** — "
                "status_of() 가 한쪽만 봅니다. 44%도 48%도 정상으로 뜹니다.")
+
+@st.dialog("이 값을 왜 보여주지 않나")
+def 감춘이유(칸, 사유, 도달, 비중, dim):
+    """조건 값만 보여준다. 지표 값·증감·p값은 넣지 않는다."""
+    st.markdown(f"**{dim} · {칸}**")
+    st.table(pd.DataFrame([
+        {"항목": "걸린 조건", "값": "표본이 모자란다" if "표본" in 사유
+                                else ("기간이 안 찼다" if "관측" in 사유 else "비교가 공정하지 않다")},
+        {"항목": "사유", "값": 사유},
+        {"항목": "표본 수", "값": f"{도달:,}건 (최소 {C.MIN_SAMPLE:,}건)"},
+        {"항목": "이 구간에서의 비중", "값": f"{비중*100:.1f}%"},
+    ]).set_index("항목"))
+    부족 = C.MIN_SAMPLE - 도달
+    # 이 데이터는 12개월치다. 지금 속도로 부족분을 채우는 데 걸리는 날.
+    일 = 부족 / max(도달, 1) * 365
+    st.info(f"**무엇을 하면 믿을 수 있나** — 이 칸에 **{부족:,}건**이 더 쌓이면 "
+            f"판정할 수 있습니다. 지금 속도(12개월에 {도달:,}건)면 약 **{일:.0f}일** "
+            f"뒤입니다. 기다릴 수 없으면 축을 더 굵게 묶으십시오 "
+            f"(예: 기관을 권역으로).")
+    st.caption("전환율·증감은 계산하지 않았으므로 여기에도 없습니다.")
+
 
 # ── 판정 카드 ─────────────────────────────────────────────────────
 ui.section("판정", "가드레일까지 보고 판정한다")
@@ -144,13 +168,32 @@ def _months(t):
     return sorted(월.astype(str).unique())
 
 
+def _qp(키, 후보, 기본):
+    """URL 에서 읽되, 없거나 이상한 값이면 기본값으로 떨어진다. 에러를 내지 않는다."""
+    v = st.query_params.get(키)
+    return v if v in 후보 else 기본
+
+
+# 필터는 fragment **밖**에 둔다. 조각 안에서 query_params 를 갱신하면
+# 조각만 다시 그려져 URL 과 화면이 어긋난다.
+ms = _months(t)
+_축 = _qp("axis", C.DIMS, C.DIMS[0])
+_lo = _qp("from", ms, ms[0])
+_hi = _qp("to", ms, ms[-1])
+if _lo > _hi:
+    _lo, _hi = ms[0], ms[-1]
+
+축 = st.segmented_control("분해 축", C.DIMS, default=_축, key="axis_sel") or _축
+lo, hi = st.select_slider("의뢰월 구간", options=ms, value=(_lo, _hi), key="period_sel")
+st.query_params.update({"axis": 축, "from": lo, "to": hi})
+st.code(f"?axis={축}&from={lo}&to={hi}", language=None)
+st.caption("현재 화면 링크 — 주소창 뒤에 붙이면 같은 화면이 열립니다.")
+
+
 @st.fragment
-def 획득_퍼널(t):
+def 획득_퍼널(t, 축, 시작월, 끝월):
     st.caption(f"[확인용] 이 조각을 그린 시각 {datetime.now():%H:%M:%S}")   # 나중에 지운다
-    ms = _months(t)
-    lo, hi = st.select_slider("의뢰월 구간", options=ms, value=(ms[0], ms[-1]),
-                              key="acq_period")
-    fe = _cohort_events(t, lo, hi)
+    fe = _cohort_events(t, 시작월, 끝월)
     if not len(fe):
         st.info("그 구간에 해당하는 건이 없습니다.")
         return
@@ -172,9 +215,7 @@ def 획득_퍼널(t):
             # 분해 축. 방문진단군을 기본으로 둔다 — 4칸 모두 최소표본을 넘고
             # 격차가 24.8%p로 유일하게 유의하다(p=1.27e-11). 지역 자체는 못 바꾸지만
             # 배차·인력 배분은 바꿀 수 있다. 나머지 둘은 눌러 볼 수는 있게 남긴다.
-            DIMS = C.DIMS
-            dim = st.radio("분해 축", DIMS, horizontal=True,
-                           label_visibility="collapsed")
+            dim = 축
             i = st.selectbox(
                 "구간", range(len(f) - 1),
                 format_func=lambda i: f"{f.label.iloc[i]} → {f.label.iloc[i+1]}",
@@ -189,26 +230,28 @@ def 획득_퍼널(t):
                 if len(믿음):
                     st.plotly_chart(charts.device_compare(믿음), width="stretch",
                                     config={"displayModeBar": False})
-                    hi = 믿음.loc[믿음.전환율.idxmax()]
-                    lo = 믿음.loc[믿음.전환율.idxmin()]
-                    if hi[dim] != lo[dim]:
+                    최고 = 믿음.loc[믿음.전환율.idxmax()]
+                    최저 = 믿음.loc[믿음.전환율.idxmin()]
+                    if 최고[dim] != 최저[dim]:
                         ui.callout(
-                            f"<b>{lo[dim]}</b>이(가) 전체의 "
-                            f"<b>{lo.비중*100:.1f}%</b>인데 전환율은 "
-                            f"<b>{lo.전환율*100:.1f}%</b>로 "
-                            f"{hi[dim]}({hi.전환율*100:.1f}%)보다 "
-                            f"<b>{(hi.전환율-lo.전환율)*100:.1f}%p 낮습니다.</b>")
+                            f"<b>{최저[dim]}</b>이(가) 전체의 "
+                            f"<b>{최저.비중*100:.1f}%</b>인데 전환율은 "
+                            f"<b>{최저.전환율*100:.1f}%</b>로 "
+                            f"{최고[dim]}({최고.전환율*100:.1f}%)보다 "
+                            f"<b>{(최고.전환율-최저.전환율)*100:.1f}%p 낮습니다.</b>")
                 else:
                     ui.callout("믿을 수 있는 칸이 없습니다. 이 축으로는 판정하지 않습니다.")
 
                 # 감춘 칸 — 사유만 적는다. 지표 값은 적지 않는다.
                 for _, r in 감춤.iterrows():
                     st.markdown(
-                        f'<div class="card tight" style="margin-bottom:6px">'
+                        f'<div class="card tight" style="margin-bottom:2px">'
                         f'<b>{r[dim]}</b> {ui.badge("block", "판정 보류")}'
                         f'<div style="font-size:12.5px;color:#64748b;margin-top:4px">'
                         f'{r.사유} · 이 구간 도달의 {r.비중*100:.1f}%</div></div>',
                         unsafe_allow_html=True)
+                    if st.button("왜 감췄나", key=f"why_{dim}_{r[dim]}"):
+                        감춘이유(r[dim], r.사유, int(r.도달), float(r.비중), dim)
                 if len(감춤):
                     st.caption(f"{len(감춤)}칸을 감췄습니다 — 표본이 모자라 전환율을 "
                                f"**계산하지 않았습니다.**")
@@ -240,7 +283,7 @@ def 유지_퍼널(t):
 tab1, tab2 = st.tabs(["획득 퍼널", "유지 퍼널"])
 with tab1:
     ui.section("획득 퍼널", "그레인을 먼저 확인한다")
-    획득_퍼널(t)
+    획득_퍼널(t, 축, lo, hi)
 with tab2:
     ui.section("유지 퍼널", "데려온 대상이 남는가")
     유지_퍼널(t)
