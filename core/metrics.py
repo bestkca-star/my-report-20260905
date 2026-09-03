@@ -97,11 +97,39 @@ def funnel_by(fe: pd.DataFrame, se: pd.DataFrame, dim: str,
     쪼개는 기준은 이것이다: 그 축으로 나눴을 때 **손을 쓸 수 있는가.**
     나눠서 격차가 보여도 우리가 못 바꾸는 것이면 분해할 이유가 적다.
 
-    반환: DataFrame[<dim>, 도달, 전환, 전환율, 비중]
+    반환: DataFrame[<dim>, 도달, 전환, 전환율, 비중, 사유]
+
+    **못 믿을 칸은 전환을 세지 않는다.** 사유가 있으면 전환·전환율이 NaN 이다.
+    계산해 놓고 화면에서 빼는 것이 아니라, 계산 자체를 하지 않는다 —
+    값이 변수에 들어 있으면 리포트나 로그로 새어 나간다.
+    도달(표본 수)은 **조건 값**이라 감추지 않는다.
     """
-    todo("Day3 실습 B", "분해",
-         "무엇으로 쪼갤지 정하십시오. 쪼개서 격차가 보이면 손을 쓸 수 있습니까?",
-         "core/metrics.py  funnel_by()")
+    ID, STEP = C.EVENT_ID_COL, C.EVENT_STEP_COL
+
+    # 그레인은 획득 퍼널과 같은 **검진 건 1회**다. 중복 행이 있으므로 고유값으로 센다.
+    앞 = set(fe.loc[fe[STEP] == step_from, ID])
+    뒤 = set(fe.loc[fe[STEP] == step_to, ID])
+    attr = se.set_index(ID)[dim]
+    도달 = attr[attr.index.isin(앞)]
+    n = 도달.value_counts()
+    n = n[n > 0]
+
+    rows = []
+    for 칸, 도달수 in n.items():
+        # ★ 먼저 묻는다. 걸리면 전환을 **세지 않는다.**
+        사유 = trust_check({}, int(도달수))
+        if 사유:
+            rows.append({dim: 칸, "도달": int(도달수), "전환": np.nan,
+                         "전환율": np.nan, "사유": 사유})
+            continue
+        전환 = len({i for i in 도달.index[도달 == 칸] if i in 뒤})
+        rows.append({dim: 칸, "도달": int(도달수), "전환": 전환,
+                     "전환율": 전환 / 도달수, "사유": None})
+
+    g = pd.DataFrame(rows)
+    # 비중은 도달(표본 수) 기준이라 감추지 않는다. 전환율만 보면 규모를 놓친다.
+    g["비중"] = g["도달"] / g["도달"].sum()
+    return g.sort_values("전환율", na_position="last").reset_index(drop=True)
 
 
 # ── 유지 퍼널 ─────────────────────────────────────────────────────
@@ -414,10 +442,24 @@ def trust_check(srm: dict, n_total: int, days: int | None = None) -> str | None:
 
     반환: 못 믿을 이유(str) 또는 None
     """
-    todo("Day3 실습 C", "못 믿을 조건 분기",
-         "배정·표본·기간 셋 중 하나라도 걸리면 사유를 돌려주십시오. "
-         "돌려주면 지표를 계산하지 않습니다.",
-         "core/metrics.py  trust_check()")
+    # 분기는 하나다. 조건이 셋이라고 분기를 셋으로 만들면 나중에 하나를 빠뜨린다.
+    # 걸리면 사유를 돌려주고, 부르는 쪽은 거기서 멈춘다 — 지표를 계산하지 않는다.
+
+    # ① 표본이 모자란다. 이 도메인은 대개 여기 걸린다.
+    if n_total < C.MIN_SAMPLE:
+        return f"표본 {n_total:,}건 (최소 {C.MIN_SAMPLE:,})"
+
+    # ② 기간이 안 찼다. 아직 다음 단계로 갈 시간이 없는 건이 섞여 있다.
+    if days is not None and days < C.MIN_DAYS:
+        return (f"관측 {days}일 (최소 {C.MIN_DAYS}일 — "
+                f"의뢰부터 결과 수신까지 걸리는 최대 기간)")
+
+    # ③ 비교가 공정하지 않다. 이 도메인엔 실험이 없으므로 배정 비율 대신
+    #    "유효 구간 밖 건이 섞였는가"를 본다. 부르는 쪽이 srm 으로 넘긴다.
+    if srm and not srm.get("ok", True):
+        return srm.get("reason") or "비교 조건이 공정하지 않음"
+
+    return None
 
 
 @st.cache_data(show_spinner=False)

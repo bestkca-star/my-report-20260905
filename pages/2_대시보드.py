@@ -145,46 +145,49 @@ def 획득_퍼널(t):
                 f"<b>{(1-bn.step_rate)*100:.1f}%가 이탈</b>합니다.")
 
         with right:
-            # ★ Day3 — 분해 축. 내 데이터의 컬럼명으로 바꾼다.
-            DIMS = ["device", "channel"]
+            # 분해 축. 방문진단군을 기본으로 둔다 — 4칸 모두 최소표본을 넘고
+            # 격차가 24.8%p로 유일하게 유의하다(p=1.27e-11). 지역 자체는 못 바꾸지만
+            # 배차·인력 배분은 바꿀 수 있다. 나머지 둘은 눌러 볼 수는 있게 남긴다.
+            DIMS = C.DIMS
             dim = st.radio("분해 축", DIMS, horizontal=True,
                            label_visibility="collapsed")
             i = st.selectbox(
                 "구간", range(len(f) - 1),
                 format_func=lambda i: f"{f.label.iloc[i]} → {f.label.iloc[i+1]}",
                 index=min(bi - 1, len(f) - 2))
-            g = ui.guard(M.funnel_by, t[C.FUNNEL_TABLE], t.get("sessions"), dim,
+            g = ui.guard(M.funnel_by, t[C.FUNNEL_TABLE], t["검진건"], dim,
                          f.step.iloc[i], f.step.iloc[i + 1])
             if g is not None and len(g):
-                st.plotly_chart(charts.device_compare(g), width="stretch",
-                                config={"displayModeBar": False})
-                hi = g.loc[g.전환율.idxmax()]
-                lo = g.loc[g.전환율.idxmin()]
-                if hi[g.columns[0]] != lo[g.columns[0]]:
-                    ui.callout(
-                        f"<b>{lo[g.columns[0]]}</b>이(가) 전체의 "
-                        f"<b>{lo.비중*100:.1f}%</b>인데 전환율은 "
-                        f"<b>{lo.전환율*100:.1f}%</b>로 "
-                        f"{hi[g.columns[0]]}({hi.전환율*100:.1f}%)보다 "
-                        f"<b>{(hi.전환율-lo.전환율)*100:.1f}%p 낮습니다.</b>")
+                믿음 = g[g.사유.isna()]
+                감춤 = g[g.사유.notna()]
 
-        # 차트 아래에 표로도 보여준다. 차트는 모양을, 표는 숫자를 읽는 자리다.
-        # step_rate·cum_rate 는 funnel() 이 이미 0~1 로 돌려주므로 나누지 않는다.
-        st.dataframe(
-            f[["label", "n", "step_rate", "cum_rate"]].rename(columns={
-                "label": "단계", "n": "도달 수",
-                "step_rate": "단계 전환율", "cum_rate": "누적 전환율"}),
-            column_config={
-                "단계": st.column_config.TextColumn("단계"),
-                "도달 수": st.column_config.NumberColumn("도달 수", format="%,d"),
-                "단계 전환율": st.column_config.ProgressColumn(
-                    # "%.1f%%" 는 100을 곱하지 않아 0.8952 가 "0.9%" 로 뜬다.
-                # "percent" 는 곱해서 "89.52%" 로 뜬다.
-                "단계 전환율", min_value=0, max_value=1, format="percent"),
-                "누적 전환율": st.column_config.ProgressColumn(
-                    "누적 전환율", min_value=0, max_value=1, format="percent"),
-            },
-            hide_index=True, width="stretch")   # use_container_width 는 폐기됐다
+                # 믿을 수 있는 칸만 그린다. 걸린 칸은 값이 아예 없다(계산하지 않았다).
+                if len(믿음):
+                    st.plotly_chart(charts.device_compare(믿음), width="stretch",
+                                    config={"displayModeBar": False})
+                    hi = 믿음.loc[믿음.전환율.idxmax()]
+                    lo = 믿음.loc[믿음.전환율.idxmin()]
+                    if hi[dim] != lo[dim]:
+                        ui.callout(
+                            f"<b>{lo[dim]}</b>이(가) 전체의 "
+                            f"<b>{lo.비중*100:.1f}%</b>인데 전환율은 "
+                            f"<b>{lo.전환율*100:.1f}%</b>로 "
+                            f"{hi[dim]}({hi.전환율*100:.1f}%)보다 "
+                            f"<b>{(hi.전환율-lo.전환율)*100:.1f}%p 낮습니다.</b>")
+                else:
+                    ui.callout("믿을 수 있는 칸이 없습니다. 이 축으로는 판정하지 않습니다.")
+
+                # 감춘 칸 — 사유만 적는다. 지표 값은 적지 않는다.
+                for _, r in 감춤.iterrows():
+                    st.markdown(
+                        f'<div class="card tight" style="margin-bottom:6px">'
+                        f'<b>{r[dim]}</b> {ui.badge("block", "판정 보류")}'
+                        f'<div style="font-size:12.5px;color:#64748b;margin-top:4px">'
+                        f'{r.사유} · 이 구간 도달의 {r.비중*100:.1f}%</div></div>',
+                        unsafe_allow_html=True)
+                if len(감춤):
+                    st.caption(f"{len(감춤)}칸을 감췄습니다 — 표본이 모자라 전환율을 "
+                               f"**계산하지 않았습니다.**")
 
 
 @st.fragment

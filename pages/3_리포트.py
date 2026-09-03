@@ -80,7 +80,7 @@ with body:
         if "device" in sec.get("charts", []):
             f = M.funnel(t[C.FUNNEL_TABLE])
             bi = max(int(f.index[f.is_bottleneck][0]), 1)
-            g = ui.guard(M.funnel_by, t[C.FUNNEL_TABLE], t.get("sessions"), DIM,
+            g = ui.guard(M.funnel_by, t[C.FUNNEL_TABLE], t["검진건"], DIM,
                          f.step.iloc[bi - 1], f.step.iloc[bi])
             if g is not None:
                 st.image(pdf_charts.device_png(g), width="stretch")
@@ -114,7 +114,7 @@ with c1:
             charts = {"funnel": pdf_charts.funnel_png(f)}
             빠짐 = []
             try:
-                g = M.funnel_by(t[C.FUNNEL_TABLE], t.get("sessions"), DIM,
+                g = M.funnel_by(t[C.FUNNEL_TABLE], t["검진건"], DIM,
                                 f.step.iloc[bi - 1], f.step.iloc[bi])
                 charts["device"] = pdf_charts.device_png(g)
             except NotYet as e:
