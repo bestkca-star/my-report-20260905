@@ -28,7 +28,7 @@ if t is None:
 secs = S.build(t, st.session_state.human)
 
 # ★ 리포트 차트에 쓸 분해 축. 내 데이터의 컬럼명으로 바꾼다.
-DIM = "device"
+DIM = C.DIMS[0]      # 분해 축은 config 에서 온다 (지표 정의는 config 에서만 바꾼다)
 
 st.markdown('<div style="font-size:24px;font-weight:800;margin-bottom:16px">'
             '리포트</div>', unsafe_allow_html=True)

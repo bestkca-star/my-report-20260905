@@ -100,6 +100,30 @@ if k:
     st.caption("⚠ 심사유의율의 **위쪽 경고선(43%·47%)은 아직 판정에 반영되지 않습니다** — "
                "status_of() 가 한쪽만 봅니다. 44%도 48%도 정상으로 뜹니다.")
 
+# ── 판정 카드 ─────────────────────────────────────────────────────
+ui.section("판정", "가드레일까지 보고 판정한다")
+j = ui.guard(M.judge, t)
+if j:
+    MARK = {"ok": "○", "warn": "▲", "block": "✕", "none": "●"}
+    col = C.COLORS.get(j["색"], "#94a3b8")
+    # 색만으로 전달하지 않는다 — 기호·글자를 같이 쓴다(색맹 고려).
+    st.markdown(
+        f'<div class="card" style="border-left:4px solid {col}">'
+        f'<div style="font-size:12px;color:#64748b">{j["기간"]} · 표본 {j["표본"]:,}건</div>'
+        f'<div style="font-size:20px;font-weight:800;margin-top:2px">'
+        f'{MARK[j["색"]]} {j["판정"]}</div>'
+        + (f'<div style="font-size:12.5px;color:#64748b;margin-top:6px">{j["사유"]}</div>'
+           if j["사유"] else "")
+        + '</div>', unsafe_allow_html=True)
+
+    # 판정 과정 — 어디까지 갔다가 어디서 갈렸는지. 접힌 상태로 시작한다.
+    with st.status("판정 과정", expanded=False) as box:
+        for st_ in j["단계"]:
+            표 = {True: "✓", False: "✕", None: "—"}[st_["통과"]]
+            st.write(f"{표} **{st_['이름']}** — {st_['값']}")
+        box.update(label=f"판정 과정 · {j['판정']}",
+                   state="error" if j["색"] == "block" else "complete")
+
 # ── 퍼널 (탭) ─────────────────────────────────────────────────────
 def _cohort_events(t, lo, hi):
     """의뢰월이 [lo, hi] 안인 검진 건의 이벤트만 남긴다.
