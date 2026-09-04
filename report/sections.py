@@ -17,11 +17,15 @@ from datetime import datetime
 
 from core import config as C, metrics as M
 from core.todo import todo
+from report import autotext as A
 
 # ★ 자동 생성 문장에 인과를 단정하는 말을 쓰지 않는다.
 #   관측 데이터로는 인과를 주장할 수 없는데, 방심하면 자동 문장이 인과를 쓴다.
 #   내 도메인에만 있는 단정 표현이 있으면 여기에 더한다.
-BANNED = ["때문에", "덕분에", "효과로", "입증되었", "증명되었", "확실히"]
+#   검진 도메인: 검사 수치와 판정 결과가 같은 표에 있어 상관을 인과로 쓰기 쉽다.
+#   "공복혈당이 높아 심사유의가 났다"는 이 데이터로 가릴 수 없는 주장이다.
+BANNED = ["때문에", "덕분에", "효과로", "입증되었", "증명되었", "확실히",
+          "원인이다", "유발", "기인", "영향을 미쳤", "개선되었음이 확인", "시사한다"]
 
 
 def check_phrasing(text: str) -> list[str]:
@@ -30,6 +34,22 @@ def check_phrasing(text: str) -> list[str]:
     **그대로 쓴다.** 사람이 쓴 장에도 걸어라 — 사람이 더 자주 쓴다.
     """
     return [w for w in BANNED if w in text]
+
+
+def _human_limits():
+    """사람이 적은 한계. 화면에서 고친 것이 있으면 그것을 쓴다."""
+    try:
+        import streamlit as st
+        v = st.session_state.get("human_limits")
+        if v is not None:
+            return list(v)
+    except Exception:
+        pass
+    return A.HUMAN_LIMITS
+
+
+GUIDE_NOTE = A.GUIDE_NOTE
+guide_for = A.guide_for
 
 
 def _fmt(n, unit=""):
@@ -47,9 +67,7 @@ def _s1_summary(t: dict) -> dict:
 
     반환: {"title": "1. 요약", "kind": "auto", "body": "..."}
     """
-    todo("Day4 실습 A", "1. 요약",
-         "무슨 수치를 요약에 넣습니까? 인과를 단정하지 않고 쓸 수 있습니까?",
-         "report/sections.py  _s1_summary()")
+    return {"title": "1. 요약", "kind": "auto", "body": A.summary(t)}
 
 
 def _s3_method(t: dict) -> dict:
@@ -62,9 +80,7 @@ def _s3_method(t: dict) -> dict:
 
     지표의 정의는 **위키가 원본**이다. 여기서 새로 정의하지 않는다.
     """
-    todo("Day4 실습 A", "3. 방법",
-         "분석 단위가 무엇입니까? 무엇을 세고 무엇을 뺐습니까?",
-         "report/sections.py  _s3_method()")
+    return {"title": "3. 방법", "kind": "auto", "body": A.method(t)}
 
 
 def _s4_results(t: dict) -> dict:
@@ -77,9 +93,8 @@ def _s4_results(t: dict) -> dict:
 
     charts 키에 차트 이름을 넣으면 PDF에 그려진다. 예) ["funnel", "device"]
     """
-    todo("Day4 실습 A", "4. 결과",
-         "결과와 해석을 섞지 않았습니까? '왜'가 들어갔으면 6장으로 옮기십시오.",
-         "report/sections.py  _s4_results()")
+    return {"title": "4. 결과", "kind": "auto", "body": A.results(t),
+            "charts": ["funnel", "device"]}
 
 
 def _s5_experiments(t: dict) -> dict:
@@ -94,9 +109,10 @@ def _s5_experiments(t: dict) -> dict:
     실험이 없으면 이 장을 빼거나, 전후 비교를 적되
     **"인과를 주장할 수 없다"를 같은 문단에 남긴다.**
     """
-    todo("Day4 실습 A", "5. 실험",
-         "무효 실험의 수치를 쓰지 않았습니까? 실험이 없으면 이 장을 뺍니까?",
-         "report/sections.py  _s5_experiments()")
+    # 이 도메인엔 무작위 배정 실험이 없다. 전후 비교로 대신하되
+    # "인과를 주장할 수 없다"를 그 장의 첫 문단에 둔다.
+    return {"title": "5. 전후 비교", "kind": "auto",
+            "body": A.before_after(t)}
 
 
 def _s7_limits(t: dict) -> dict:
@@ -122,9 +138,8 @@ def _s7_limits(t: dict) -> dict:
     그리고 **가정값이 들어간 문장에는 "가정값 기반"을 붙인다.**
     실측값과 가정값이 한 문단에 섞이면 읽는 사람은 둘 다 실측으로 읽는다.
     """
-    todo("Day4 실습 D", "7. 한계",
-         "검증 경고를 전부 옮겼습니까? 7주차에 판정한 것 3건이 들어갔습니까?",
-         "report/sections.py  _s7_limits()")
+    return {"title": "7. 한계", "kind": "auto",
+            "body": A.limits(t, _human_limits())}
 
 
 # ── 사람이 쓰는 장 (제공) ─────────────────────────────────────────

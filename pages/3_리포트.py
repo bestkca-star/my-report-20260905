@@ -92,6 +92,19 @@ with body:
         st.caption(sec["placeholder"])
         if sec.get("hint"):
             ui.callout(sec["hint"], "info")
+
+        # 데이터 기반 가이드 — 화면에만 보인다. 문서에는 안 들어간다.
+        gd = S.guide_for(sec["title"], t)
+        if gd:
+            with st.expander("작성 가이드 (지금 데이터 기준)", expanded=False):
+                ui.callout(S.GUIDE_NOTE, "warn")
+                for 머리, 항목 in gd.items():
+                    쓸 = [x for x in 항목 if x]
+                    if not 쓸:
+                        continue
+                    st.markdown(f"**{머리}**")
+                    for x in 쓸:
+                        st.markdown(f"- {x}")
         txt = st.text_area("본문", value=sec["body"], height=280,
                            key=f"h_{sec['title']}", label_visibility="collapsed")
         if st.button("저장", type="primary"):
