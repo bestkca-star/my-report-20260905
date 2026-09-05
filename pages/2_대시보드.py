@@ -7,7 +7,6 @@
   Day2  지표 카드 · 획득 퍼널 · 유지 퍼널
   Day3  분해 · 실험 카드
 """
-from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -30,7 +29,6 @@ if t is None:
 
 st.markdown('<div style="font-size:24px;font-weight:800;margin-bottom:16px">'
             '대시보드</div>', unsafe_allow_html=True)
-st.caption(f"[확인용] 페이지 전체를 그린 시각 {datetime.now():%H:%M:%S}")   # 나중에 지운다
 
 # ── 지표 카드 ─────────────────────────────────────────────────────
 # delta 방향. "낮을수록 좋은" 지표는 inverse (오르면 빨강).
@@ -231,7 +229,6 @@ st.caption("현재 화면 링크 — 주소창 뒤에 붙이면 같은 화면이
 
 @st.fragment
 def 획득_퍼널(t, 축, 시작월, 끝월):
-    st.caption(f"[확인용] 이 조각을 그린 시각 {datetime.now():%H:%M:%S}")   # 나중에 지운다
     fe = _cohort_events(t, 시작월, 끝월)
     if not len(fe):
         st.info("그 구간에 해당하는 건이 없습니다.")
@@ -298,7 +295,6 @@ def 획득_퍼널(t, 축, 시작월, 끝월):
 
 @st.fragment
 def 유지_퍼널(t):
-    st.caption(f"[확인용] 이 조각을 그린 시각 {datetime.now():%H:%M:%S}")   # 나중에 지운다
     if not C.RETENTION_STEPS:
         st.caption("config.RETENTION_STEPS 가 비어 있습니다. "
                    "7주차에 정한 유지·이탈의 정의를 옮기면 여기에 그려집니다.")
