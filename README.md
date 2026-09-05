@@ -124,3 +124,16 @@ python tests/test_app.py
 ```
 
 4개 화면 렌더 · 적재 · 게이트 1·2 통과를 확인합니다.
+
+---
+
+## 출처와 라이선스
+
+이 앱은 모두의연구소 8주차 실습 골격(`project3-report`)에서 출발해
+제 도메인(방문검진 합성데이터)으로 옮긴 것입니다.
+
+- 골격과 동봉 문서(`DESIGN.md`, `내_화면_만드는_법.md`, `숫자를_검증하는_법.md`,
+  `적은_표본으로_판단하기.md`, `Claude와_글을_쓸_때.md`)의 저작권은 원저자에게 있습니다.
+- MIT License (Copyright (c) 2026 kym20b) — 전문은 [LICENSE](LICENSE) 참조.
+- `CLAUDE.md` · `판단기준.md` · `report/autotext.py` · `data/` 는 이 실습에서
+  제가 만든 것입니다.
