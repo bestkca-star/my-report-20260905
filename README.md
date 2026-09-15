@@ -12,6 +12,11 @@
 
 ## 시작
 
+**배포본** — <https://my-report-20260905.streamlit.app/>
+`master` 를 보고 있습니다. 푸시해야 반영됩니다.
+
+로컬:
+
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
